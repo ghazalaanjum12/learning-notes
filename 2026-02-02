@@ -1,305 +1,151 @@
-📌 HTTP Overview
+##Topics:
+How does HTTP work, different types of HTTP verbs, HTTP messages, different response status codes, how is a tcp connection done and how is ssl connection made
+# HTTP & Networking Notes
+
+## HTTP Overview
+
+**What is HTTP?**
+- HTTP (Hypertext Transfer Protocol) is an **application‑layer protocol** used to fetch resources (HTML, images, videos) on the Web. It follows a **client‑server model**: clients (like browsers) send requests and servers send responses. :contentReference[oaicite:0]{index=0}
+
+**Key Characteristics of HTTP**
+- Designed to be **simple and human‑readable** (especially in HTTP/1.x). :contentReference[oaicite:1]{index=1}  
+- **Stateless**: each request/response pair is independent; the protocol itself doesn’t retain session state. :contentReference[oaicite:2]{index=2}  
+- **Extensible**: headers allow additional semantics, features, and metadata. :contentReference[oaicite:3]{index=3}
+
+**HTTP & Connections**
+- HTTP sits on top of a **reliable transport** (usually TCP). :contentReference[oaicite:4]{index=4}  
+- Early HTTP/1.0 opened new connections per request; later versions improved with *persistent connections* and *multiplexing* (HTTP/2) to boost efficiency. :contentReference[oaicite:5]{index=5}  
+- Protocols like **QUIC** (used in HTTP/3) build on UDP to increase performance. :contentReference[oaicite:6]{index=6}
+
+## Evolution of HTTP
+
+**Major Versions**
+- **HTTP/0.9 → HTTP/1.0**: initial simple design for hypertext. :contentReference[oaicite:7]{index=7}  
+- **HTTP/1.1**: persistent connections, pipelining, richer semantics. :contentReference[oaicite:8]{index=8}  
+- **HTTP/2**: binary framing, header compression, concurrent streams. :contentReference[oaicite:9]{index=9}  
+- **HTTP/3**: replaces TCP with QUIC (UDP‑based), reduces latency. :contentReference[oaicite:10]{index=10}
 
-HTTP (Hypertext Transfer Protocol) is the protocol used for communication between clients (e.g., browsers, APIs) and servers. It follows a request–response model.
+**Standardization**
+- HTTP spec split into modular RFCs (semantics, caching, each version). :contentReference[oaicite:11]{index=11}
+
+## A Typical HTTP Session
+
+**Session Phases**
+1. Client initiates a **TCP connection**.
+2. Client sends request(s); server processes and sends back response(s). :contentReference[oaicite:12]{index=12}  
+3. For HTTP/1.1+, connection stays open, allowing multiple requests. :contentReference[oaicite:13]{index=13}
 
-HTTP is stateless — each request is independent; sessions (state) are implemented with cookies, tokens, etc.
+**Request Structure**
+- **Request line**: method, path, HTTP version.  
+- **Headers**: metadata (like content type, encoding).  
+- **Optional body**: for methods like `POST`, `PUT`. :contentReference[oaicite:14]{index=14}
 
-HTTP evolves (HTTP/1.1 → HTTP/2 → HTTP/3) mostly in how messages are framed and optimized, but core semantics (methods, status codes) remain consistent.
+**Response Structure**
+- **Status line**: HTTP version, status code, reason phrase.  
+- **Headers**: metadata (cache rules, content type).  
+- **Optional body**: resource content. :contentReference[oaicite:15]{index=15}
+
+## Sessions in HTTP
 
-Messages are composed of:
+**Stateless vs Stateful**
+- By default, HTTP is **stateless**; requests don’t carry memory of prior ones. :contentReference[oaicite:16]{index=16}  
+- **HTTP cookies** attach small pieces of data to responses/requests, enabling a *session context* across multiple requests. :contentReference[oaicite:17]{index=17}
 
-Start line (method or status),
+**Cookies & Session Management**
+- Server sends a `Set‑Cookie` header; browser stores and sends it on future requests for that domain. :contentReference[oaicite:18]{index=18}  
+- Cookies can represent session IDs, user preferences, login status, etc. :contentReference[oaicite:19]{index=19}  
+- Cookie attributes (`Secure`, `HttpOnly`, `SameSite`) control security & scope. :contentReference[oaicite:20]{index=20}
 
-Headers (metadata),
+## HTTP Messages
 
-Body (optional content).
+**Types of Messages**
+- **Requests** (client → server): ask for actions on resources.  
+- **Responses** (server → client): carry results, status, data. :contentReference[oaicite:21]{index=21}
 
-🧠 HTTP Session Flow
+**Message Anatomy**
+Both requests and responses generally contain:
+1. **Start line** (request line or status line).  
+2. **Headers** (metadata).  
+3. Blank line.  
+4. **Body** (optional). :contentReference[oaicite:22]{index=22}
 
-(Summary of how a session/request works internally)
+**HTTP/2 & HTTP/3**
+- Messages are encoded in **frames** (binary) for efficiency; semantics remain consistent with older text formats. :contentReference[oaicite:23]{index=23}
 
-Client opens a connection (usually TCP) to server.
+## HTTP Methods
 
-Client sends request with method + headers + optional body.
+HTTP defines several *verbs* indicating the action desired:
 
-Server processes and sends response with status code + headers + optional body.
+| Method | Purpose |
+|--------|---------|
+| `GET` | Retrieve representation of a resource. |
+| `HEAD` | Same as GET but without body. |
+| `POST` | Send data to server (often for creation). |
+| `PUT` | Replace resource. |
+| `PATCH` | Partially modify resource. |
+| `DELETE` | Remove resource. |
+| `OPTIONS` | List supported methods/options. |
+| `CONNECT` | Establish a tunnel (e.g., for proxies). |
+| `TRACE` | Diagnostic loop‑back test. |  
+:contentReference[oaicite:24]{index=24}
 
-Connection may close or be reused (persistent connections, HTTP/2 multiplexing).
+**Properties**
+- Methods can be **safe** (don’t change server state), **idempotent**, or **cacheable**. :contentReference[oaicite:25]{index=25}
 
-🚀 Common HTTP Request Methods
+## HTTP Status Codes
 
-HTTP methods define the intent of a request.
+HTTP responses include numeric codes grouped by purpose:
 
-Method	Meaning	Safe	Idempotent
-GET	Retrieve resource	Yes	Yes
-HEAD	Same as GET, no body	Yes	Yes
-POST	Create resource or process data	No	No
-PUT	Replace/update resource	No	Yes
-PATCH	Partially update resource	No	Not necessarily
-DELETE	Remove resource	No	Yes
-OPTIONS	Query supported methods	Yes	Yes
-<!-- CONNECT/TRACE are less commonly used in typical REST APIs. --> :contentReference[oaicite:10]{index=10}
+| Group | Range | Meaning |
+|-------|-------|---------|
+| Informational | `100–199` | Continue / processing |
+| Successful | `200–299` | OK, created, accepted, etc |
+| Redirection | `300–399` | Resource moved or requires action |
+| Client Error | `400–499` | Bad request, unauthorized, not found |
+| Server Error | `500–599` | Server failed to process request |  
+:contentReference[oaicite:26]{index=26}
 
-Notes:
+Examples:
+- `200 OK`: request succeeded.  
+- `404 Not Found`: resource missing.  
+- `500 Internal Server Error`: server failure. :contentReference[oaicite:27]{index=27}
 
-Safe means it should not change server state (e.g., GET, HEAD).
+## TCP Connection Establishment
 
-Idempotent means multiple identical requests have the same server effect (useful in retries).
+**Three‑Way Handshake**
+1. **SYN**: Client → Server requests connection.  
+2. **SYN‑ACK**: Server acknowledges and replies.  
+3. **ACK**: Client acknowledges server; connection established. :contentReference[oaicite:28]{index=28}
 
-🧾 HTTP Status Codes – Important Ones to Remember
+This negotiates sequence numbers and synchronizes both ends before any data is sent. :contentReference[oaicite:29]{index=29}
 
-Status codes are grouped by their first digit and tell the client what happened with the request.
+## TLS (Transport Layer Security)
 
-✅ 1xx Informational
+**Purpose**
+- Adds **encryption**, **integrity**, and **server authentication** to TCP, forming HTTPS. :contentReference[oaicite:30]{index=30}
 
-Rare in everyday use.
+**TLS Handshake (Simplified)**
+1. **ClientHello**: client proposes TLS version and cipher suites.  
+2. **ServerHello + Certificate**: server picks ciphers, sends its cert.  
+3. **Key Exchange**: client and server derive shared symmetric keys securely (e.g., via Diffie‑Hellman).  
+4. **Finish**: secure encrypted communication begins. :contentReference[oaicite:31]{index=31}
 
-100 Continue – server got initial headers, client can send body.
+TLS uses **asymmetric cryptography** to exchange shared symmetric keys, then uses fast symmetric encryption for the session. :contentReference[oaicite:32]{index=32}
 
-✅ 2xx Success
-Code	Meaning	Typical scenario
-200 OK	Request succeeded	GET, POST success
-201 Created	New resource created	POST/PUT creating resource
-204 No Content	Successful, no body	DELETE success
+## Mutual TLS (mTLS)
 
-2xx codes tell clients everything went well.
+**Difference from TLS**
+- In **standard TLS**, only the server proves identity using its certificate.  
+- In **mTLS**, **both** client and server present and verify certificates. :contentReference[oaicite:33]{index=33}
 
-🔄 3xx Redirection
-Code	Meaning
-301 Moved Permanently	Resource permanently at new URL
-302 Found	Temporary redirect
-304 Not Modified	Cached response still valid
+**mTLS Handshake Steps**
+1. ClientHello.  
+2. ServerHello + server certificate.  
+3. **CertificateRequest**: server requests client cert.  
+4. Client sends its certificate.  
+5. Both verify certificates with trusted CAs.  
+6. Shared symmetric keys are established; encrypted session begins. :contentReference[oaicite:34]{index=34}
 
-→ Browser may automatically follow Location header.
+**Security Benefits**
+- Both endpoints are authenticated, reducing risks like impersonation and certain MITM attacks. :contentReference[oaicite:35]{index=35}
 
-🚫 4xx Client Errors
-Code	Meaning
-400 Bad Request	Invalid client request
-401 Unauthorized	Authentication required
-403 Forbidden	Access not allowed
-404 Not Found	Resource not found
-
-→ These indicate issues with the request or client permissions.
-
-❌ 5xx Server Errors
-Code	Meaning
-500 Internal Server Error	Generic server failure
-502 Bad Gateway	Invalid response from upstream
-503 Service Unavailable	Server overloaded/maintenance
-
-→ These indicate server problems.
-
-🧠 Quick Revision Cheat Sheet
-Request Methods:
-
-GET – read
-
-POST – create/process
-
-PUT – update/replace
-
-PATCH – partial update
-
-DELETE – delete
-
-HEAD/OPTIONS – metadata & supported methods
-
-Core Statuses:
-
-200, 201, 204 → Success
-
-301, 302, 304 → Redirection
-
-400, 401, 403, 404 → Client errors
-
-500, 502, 503 → Server errors
-
-📌 Helpful Concepts
-
-HTTP is stateless, but state can be managed on top (e.g., sessions/cookies).
-
-The status line in a response includes version, status code, and reason phrase.
-
-Headers help communicate control info (like caching, content type, etc.).
-
-If you want, I can also turn this into flashcards for quicker spaced repetition revision!
-
-THis is too condensed. Give me a little bit meaningful
-
-Got it — revision-friendly but with enough meaning, not ultra-compressed.
-Below are clean, GitHub-ready notes you can skim before interviews or exams.
-(Structured, readable, and still concise.)
-
-🌐 HTTP — Meaningful Revision Notes
-1️⃣ What is HTTP?
-
-HTTP (Hypertext Transfer Protocol) is the foundation of data communication on the web.
-
-It defines how clients (browser, mobile apps, APIs) communicate with servers
-
-Uses a request → response model
-
-Runs on top of TCP/IP
-
-Stateless by design → each request is independent
-
-Any “state” (login, cart, preferences) is handled outside HTTP using cookies, tokens, or sessions.
-
-2️⃣ Evolution of HTTP (Why versions matter)
-🔹 HTTP/0.9
-
-Very simple
-
-Only supported GET
-
-No headers, no status codes
-
-🔹 HTTP/1.0
-
-Introduced:
-
-Headers
-
-Status codes
-
-Different HTTP methods
-
-Still one request per connection (slow)
-
-🔹 HTTP/1.1 (still widely used)
-
-Persistent connections (keep-alive)
-
-Chunked transfer encoding
-
-Better caching support
-
-Still suffers from head-of-line blocking
-
-🔹 HTTP/2
-
-Binary protocol (not text)
-
-Multiplexing → multiple requests over one connection
-
-Header compression
-
-Faster, more efficient
-
-🔹 HTTP/3
-
-Built on QUIC (UDP) instead of TCP
-
-Better performance on unstable networks
-
-Avoids TCP connection delays
-
-⚠️ Important:
-Methods, status codes, and semantics stay the same across versions
-
-3️⃣ HTTP Messages (Request & Response structure)
-📤 HTTP Request
-
-A request contains:
-
-Request line
-
-GET /users HTTP/1.1
-
-
-Headers
-
-Metadata (content type, auth, caching)
-
-Body (optional)
-
-Used mainly with POST, PUT, PATCH
-
-Example:
-
-POST /login HTTP/1.1
-Content-Type: application/json
-
-{ "username": "abc", "password": "xyz" }
-
-📥 HTTP Response
-
-A response contains:
-
-Status line
-
-HTTP/1.1 200 OK
-
-
-Headers
-
-Body (optional)
-
-Example:
-
-HTTP/1.1 404 Not Found
-Content-Type: application/json
-
-{ "error": "User not found" }
-
-4️⃣ HTTP Sessions & State Management
-
-Since HTTP is stateless, sessions are managed using:
-
-🍪 Cookies
-
-Stored in the browser
-
-Automatically sent with each request
-
-Can store:
-
-Session ID
-
-Preferences
-
-Security flags:
-
-HttpOnly
-
-Secure
-
-SameSite
-
-🔐 Tokens (JWT, OAuth)
-
-Sent explicitly via headers
-
-Common in REST APIs
-
-Stateless on server side
-
-🧠 Server-side sessions
-
-Server stores session data
-
-Client holds session ID
-
-5️⃣ HTTP Methods (Common & Practical)
-Method	Purpose	Typical Use
-GET	Fetch data	Read resource
-POST	Submit data	Create resource
-PUT	Replace resource	Full update
-PATCH	Partial update	Update specific fields
-DELETE	Remove resource	Delete
-HEAD	Headers only	Check resource metadata
-OPTIONS	Supported methods	CORS, preflight
-Concepts to remember:
-
-Safe → Does not modify data (GET, HEAD)
-
-Idempotent → Same result if repeated (GET, PUT, DELETE)
-
-POST is NOT idempotent
-
-6️⃣ HTTP Status Codes (Only the commonly used ones)
-🟢 2xx – Success
-Code	Meaning	When used
-200 OK	Success	GET, PUT
-201 Created	Resource created	POST
-204 No Content	Success, no body	DELETE
