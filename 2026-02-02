@@ -1,0 +1,305 @@
+📌 HTTP Overview
+
+HTTP (Hypertext Transfer Protocol) is the protocol used for communication between clients (e.g., browsers, APIs) and servers. It follows a request–response model.
+
+HTTP is stateless — each request is independent; sessions (state) are implemented with cookies, tokens, etc.
+
+HTTP evolves (HTTP/1.1 → HTTP/2 → HTTP/3) mostly in how messages are framed and optimized, but core semantics (methods, status codes) remain consistent.
+
+Messages are composed of:
+
+Start line (method or status),
+
+Headers (metadata),
+
+Body (optional content).
+
+🧠 HTTP Session Flow
+
+(Summary of how a session/request works internally)
+
+Client opens a connection (usually TCP) to server.
+
+Client sends request with method + headers + optional body.
+
+Server processes and sends response with status code + headers + optional body.
+
+Connection may close or be reused (persistent connections, HTTP/2 multiplexing).
+
+🚀 Common HTTP Request Methods
+
+HTTP methods define the intent of a request.
+
+Method	Meaning	Safe	Idempotent
+GET	Retrieve resource	Yes	Yes
+HEAD	Same as GET, no body	Yes	Yes
+POST	Create resource or process data	No	No
+PUT	Replace/update resource	No	Yes
+PATCH	Partially update resource	No	Not necessarily
+DELETE	Remove resource	No	Yes
+OPTIONS	Query supported methods	Yes	Yes
+<!-- CONNECT/TRACE are less commonly used in typical REST APIs. --> :contentReference[oaicite:10]{index=10}
+
+Notes:
+
+Safe means it should not change server state (e.g., GET, HEAD).
+
+Idempotent means multiple identical requests have the same server effect (useful in retries).
+
+🧾 HTTP Status Codes – Important Ones to Remember
+
+Status codes are grouped by their first digit and tell the client what happened with the request.
+
+✅ 1xx Informational
+
+Rare in everyday use.
+
+100 Continue – server got initial headers, client can send body.
+
+✅ 2xx Success
+Code	Meaning	Typical scenario
+200 OK	Request succeeded	GET, POST success
+201 Created	New resource created	POST/PUT creating resource
+204 No Content	Successful, no body	DELETE success
+
+2xx codes tell clients everything went well.
+
+🔄 3xx Redirection
+Code	Meaning
+301 Moved Permanently	Resource permanently at new URL
+302 Found	Temporary redirect
+304 Not Modified	Cached response still valid
+
+→ Browser may automatically follow Location header.
+
+🚫 4xx Client Errors
+Code	Meaning
+400 Bad Request	Invalid client request
+401 Unauthorized	Authentication required
+403 Forbidden	Access not allowed
+404 Not Found	Resource not found
+
+→ These indicate issues with the request or client permissions.
+
+❌ 5xx Server Errors
+Code	Meaning
+500 Internal Server Error	Generic server failure
+502 Bad Gateway	Invalid response from upstream
+503 Service Unavailable	Server overloaded/maintenance
+
+→ These indicate server problems.
+
+🧠 Quick Revision Cheat Sheet
+Request Methods:
+
+GET – read
+
+POST – create/process
+
+PUT – update/replace
+
+PATCH – partial update
+
+DELETE – delete
+
+HEAD/OPTIONS – metadata & supported methods
+
+Core Statuses:
+
+200, 201, 204 → Success
+
+301, 302, 304 → Redirection
+
+400, 401, 403, 404 → Client errors
+
+500, 502, 503 → Server errors
+
+📌 Helpful Concepts
+
+HTTP is stateless, but state can be managed on top (e.g., sessions/cookies).
+
+The status line in a response includes version, status code, and reason phrase.
+
+Headers help communicate control info (like caching, content type, etc.).
+
+If you want, I can also turn this into flashcards for quicker spaced repetition revision!
+
+THis is too condensed. Give me a little bit meaningful
+
+Got it — revision-friendly but with enough meaning, not ultra-compressed.
+Below are clean, GitHub-ready notes you can skim before interviews or exams.
+(Structured, readable, and still concise.)
+
+🌐 HTTP — Meaningful Revision Notes
+1️⃣ What is HTTP?
+
+HTTP (Hypertext Transfer Protocol) is the foundation of data communication on the web.
+
+It defines how clients (browser, mobile apps, APIs) communicate with servers
+
+Uses a request → response model
+
+Runs on top of TCP/IP
+
+Stateless by design → each request is independent
+
+Any “state” (login, cart, preferences) is handled outside HTTP using cookies, tokens, or sessions.
+
+2️⃣ Evolution of HTTP (Why versions matter)
+🔹 HTTP/0.9
+
+Very simple
+
+Only supported GET
+
+No headers, no status codes
+
+🔹 HTTP/1.0
+
+Introduced:
+
+Headers
+
+Status codes
+
+Different HTTP methods
+
+Still one request per connection (slow)
+
+🔹 HTTP/1.1 (still widely used)
+
+Persistent connections (keep-alive)
+
+Chunked transfer encoding
+
+Better caching support
+
+Still suffers from head-of-line blocking
+
+🔹 HTTP/2
+
+Binary protocol (not text)
+
+Multiplexing → multiple requests over one connection
+
+Header compression
+
+Faster, more efficient
+
+🔹 HTTP/3
+
+Built on QUIC (UDP) instead of TCP
+
+Better performance on unstable networks
+
+Avoids TCP connection delays
+
+⚠️ Important:
+Methods, status codes, and semantics stay the same across versions
+
+3️⃣ HTTP Messages (Request & Response structure)
+📤 HTTP Request
+
+A request contains:
+
+Request line
+
+GET /users HTTP/1.1
+
+
+Headers
+
+Metadata (content type, auth, caching)
+
+Body (optional)
+
+Used mainly with POST, PUT, PATCH
+
+Example:
+
+POST /login HTTP/1.1
+Content-Type: application/json
+
+{ "username": "abc", "password": "xyz" }
+
+📥 HTTP Response
+
+A response contains:
+
+Status line
+
+HTTP/1.1 200 OK
+
+
+Headers
+
+Body (optional)
+
+Example:
+
+HTTP/1.1 404 Not Found
+Content-Type: application/json
+
+{ "error": "User not found" }
+
+4️⃣ HTTP Sessions & State Management
+
+Since HTTP is stateless, sessions are managed using:
+
+🍪 Cookies
+
+Stored in the browser
+
+Automatically sent with each request
+
+Can store:
+
+Session ID
+
+Preferences
+
+Security flags:
+
+HttpOnly
+
+Secure
+
+SameSite
+
+🔐 Tokens (JWT, OAuth)
+
+Sent explicitly via headers
+
+Common in REST APIs
+
+Stateless on server side
+
+🧠 Server-side sessions
+
+Server stores session data
+
+Client holds session ID
+
+5️⃣ HTTP Methods (Common & Practical)
+Method	Purpose	Typical Use
+GET	Fetch data	Read resource
+POST	Submit data	Create resource
+PUT	Replace resource	Full update
+PATCH	Partial update	Update specific fields
+DELETE	Remove resource	Delete
+HEAD	Headers only	Check resource metadata
+OPTIONS	Supported methods	CORS, preflight
+Concepts to remember:
+
+Safe → Does not modify data (GET, HEAD)
+
+Idempotent → Same result if repeated (GET, PUT, DELETE)
+
+POST is NOT idempotent
+
+6️⃣ HTTP Status Codes (Only the commonly used ones)
+🟢 2xx – Success
+Code	Meaning	When used
+200 OK	Success	GET, PUT
+201 Created	Resource created	POST
+204 No Content	Success, no body	DELETE
