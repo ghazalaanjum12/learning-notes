@@ -1,0 +1,448 @@
+# HTTP — Backend Developer Revision Notes
+> Based on [MDN Web Docs: HTTP](https://developer.mozilla.org/en-US/docs/Web/HTTP)
+
+---
+
+## Table of Contents
+1. [How HTTP Works](#1-how-http-works)
+2. [HTTP Messages](#2-http-messages)
+3. [Request Methods](#3-request-methods)
+4. [Status Codes](#4-status-codes)
+5. [Important Headers](#5-important-headers)
+6. [Authentication](#6-authentication)
+7. [Cookies & Sessions](#7-cookies--sessions)
+8. [Caching](#8-caching)
+9. [Compression](#9-compression)
+10. [CORS](#10-cors)
+11. [Redirections](#11-redirections)
+12. [Conditional Requests & ETags](#12-conditional-requests--etags)
+13. [Range Requests](#13-range-requests)
+14. [Connection Management & HTTP Versions](#14-connection-management--http-versions)
+15. [Proxy Servers & Reverse Proxies](#15-proxy-servers--reverse-proxies)
+
+---
+
+## 1. How HTTP Works
+
+HTTP is a stateless, application-layer protocol that follows a request-response cycle. The client (browser, mobile app, another service) opens a connection, sends a request, and waits for the server's response. **Stateless** means the server has no memory of previous requests — every request is independent. This is why mechanisms like cookies and tokens exist: to bolt state on top of a stateless protocol.
+
+HTTP runs over TCP (or QUIC in HTTP/3). For HTTPS, a TLS handshake happens before any HTTP traffic, encrypting everything on the wire.
+
+---
+
+## 2. HTTP Messages
+
+Every HTTP interaction is a request + response pair. Both share the same structure: a start line, headers, a blank line, and an optional body.
+
+### Request
+The start line contains the method, the path, and the HTTP version. Headers follow, and if there's a body (POST, PUT, PATCH), it comes after the blank line.
+
+```
+POST /api/users HTTP/1.1
+Host: api.example.com
+Content-Type: application/json
+Content-Length: 42
+
+{"name": "Alice", "email": "alice@example.com"}
+```
+
+### Response
+The start line contains the HTTP version, status code, and a reason phrase. Headers and an optional body follow.
+
+```
+HTTP/1.1 201 Created
+Content-Type: application/json
+Location: /api/users/123
+
+{"id": 123, "name": "Alice"}
+```
+
+As a backend developer, you're always constructing responses — choosing the right status code, setting the right headers, and deciding what goes in the body.
+
+---
+
+## 3. Request Methods
+
+Each method signals the **intent** of the request. Two properties matter a lot for how you design APIs and handle failures:
+
+- **Safe** — the request doesn't change server state. GET, HEAD, OPTIONS are safe. This means clients and intermediaries can freely retry them.
+- **Idempotent** — repeating the same request N times has the same effect as doing it once. GET, PUT, DELETE are idempotent. This is critical for retry logic: if a PUT times out, the client can safely retry it.
+
+| Method | Safe | Idempotent | Has Body | Purpose |
+|--------|------|-----------|----------|---------|
+| `GET` | ✅ | ✅ | ❌ | Retrieve a resource |
+| `HEAD` | ✅ | ✅ | ❌ | Same as GET but no response body — useful to check if a resource exists or get its metadata |
+| `POST` | ❌ | ❌ | ✅ | Create a resource or submit data. Not idempotent — repeating a POST creates duplicates |
+| `PUT` | ❌ | ✅ | ✅ | Replace a resource entirely. Idempotent — sending the same PUT twice is safe |
+| `PATCH` | ❌ | ❌ | ✅ | Partial update. Not inherently idempotent — depends on how you implement it |
+| `DELETE` | ❌ | ✅ | ❌ | Remove a resource. Idempotent — deleting an already-deleted resource should return 404 or 204, not crash |
+| `OPTIONS` | ✅ | ✅ | ❌ | Ask the server what methods are supported. Browsers send this automatically as a CORS preflight |
+| `CONNECT` | ❌ | ❌ | ❌ | Used by proxies to establish a TCP tunnel (e.g. for HTTPS through a proxy) |
+
+**PUT vs PATCH:** PUT means "replace this resource with exactly what I'm sending." PATCH means "apply these changes to the resource." For a user profile, PUT would require sending all fields; PATCH lets you send only `{"bio": "new bio"}`.
+
+---
+
+## 4. Status Codes
+
+Status codes tell the client what happened. As a backend developer, choosing the right code is part of your API contract — clients and intermediaries make decisions based on them.
+
+### 1xx — Informational
+
+**`100 Continue`** — The server is telling the client "I received your headers, go ahead and send the body." Used when a client wants to check if the server will accept a large upload before committing to sending it (via `Expect: 100-continue`).
+
+**`101 Switching Protocols`** — The server agrees to upgrade the connection to a different protocol. This is the response that kicks off a WebSocket connection.
+
+### 2xx — Success
+
+**`200 OK`** — The most common success code. Used for GET responses, successful updates, anything that doesn't fit a more specific code.
+
+**`201 Created`** — A new resource was created. Always pair this with a `Location` header pointing to the newly created resource. This is what you return after a successful POST that creates something.
+
+**`202 Accepted`** — The request has been received and queued but not yet processed. Use this for async operations — for example, triggering a background job. The response body should explain how the client can check on progress.
+
+**`204 No Content`** — Success, but there's nothing to return. The right code for DELETE responses or PUT/PATCH when you don't need to return the updated resource. A 204 must not include a response body.
+
+**`206 Partial Content`** — The server is returning only part of a resource in response to a Range request. Used for video streaming and resumable downloads.
+
+### 3xx — Redirections
+
+**`301 Moved Permanently`** — The resource has permanently moved. Browsers and search engines cache this and update their records. Note: many clients change the method to GET on redirect, even if the original was a POST.
+
+**`302 Found`** — Temporary redirect. Same method-changing behavior as 301. Use 307 instead if you need to preserve the method.
+
+**`303 See Other`** — Always redirects to the target as a GET, regardless of the original method. This is the right choice for the **Post/Redirect/Get (PRG) pattern**: after a POST, redirect with 303 to a GET URL so the user doesn't resubmit on browser refresh.
+
+**`304 Not Modified`** — The resource hasn't changed since the client last fetched it. Sent in response to conditional requests (`If-None-Match` / `If-Modified-Since`). The client should use its cached copy. No body is sent.
+
+**`307 Temporary Redirect`** — Temporary redirect that strictly preserves the original HTTP method. If the original was POST, the redirect is also POST.
+
+**`308 Permanent Redirect`** — Permanent redirect that strictly preserves the original method. Use for permanent URL migrations when method preservation matters.
+
+### 4xx — Client Errors
+
+These mean the client did something wrong. Don't return 500 for bad input — that's a 4xx.
+
+**`400 Bad Request`** — The request is malformed or invalid in some general way. Use this when the JSON is unparseable, required fields are missing, or query params are wrong. Be specific in the response body about what exactly is wrong.
+
+**`401 Unauthorized`** — Despite the name, this means **not authenticated**. The client hasn't proven who they are. Return a `WWW-Authenticate` header telling them how to authenticate. Clients should retry with credentials.
+
+**`403 Forbidden`** — The client is authenticated, but doesn't have permission to access this resource. Unlike 401, re-authenticating won't help. Sometimes it's better to return 404 instead of 403 to avoid revealing that a resource even exists.
+
+**`404 Not Found`** — The resource doesn't exist. Also appropriate when you want to hide a resource from unauthorized users — returning 403 would confirm the resource exists.
+
+**`405 Method Not Allowed`** — The resource exists but doesn't support this method (e.g. POST to a read-only endpoint). Always include an `Allow` header listing the supported methods: `Allow: GET, OPTIONS`.
+
+**`408 Request Timeout`** — The server timed out waiting for the client to finish sending the request. The client may retry.
+
+**`409 Conflict`** — The request conflicts with the current state of the resource. Classic use cases: trying to create a resource that already exists, or a version conflict in optimistic locking.
+
+**`410 Gone`** — Like 404, but signals the resource existed before and has been permanently removed. Use this when you want to explicitly tell clients (and search engines) a URL is dead forever, not just currently missing.
+
+**`413 Content Too Large`** — The request body exceeds the server's configured limit. Return this when enforcing upload size limits.
+
+**`415 Unsupported Media Type`** — The client sent a `Content-Type` the server doesn't handle. For example, your JSON API receiving `text/xml`.
+
+**`422 Unprocessable Content`** — The request is well-formed and the right content type, but the content fails semantic validation. This is the right code for **validation errors** — the JSON parsed fine, but the email address is invalid or a required field failed a business rule. Prefer this over 400 for validation.
+
+**`429 Too Many Requests`** — The client has exceeded a rate limit. Always include a `Retry-After` header telling the client when they can try again.
+
+### 5xx — Server Errors
+
+**`500 Internal Server Error`** — An unhandled exception or unexpected condition. This is the generic catch-all. Make sure your logs have enough context to debug these. Never expose stack traces to the client.
+
+**`501 Not Implemented`** — The server doesn't support the functionality required for this request. Use when a method is understood but not implemented.
+
+**`502 Bad Gateway`** — Your server is acting as a proxy and received an invalid response from the upstream service. Common when a downstream microservice is down or returning garbage.
+
+**`503 Service Unavailable`** — The server is temporarily unable to handle requests — overloaded or in maintenance. Include a `Retry-After` header. This is the right code during graceful shutdown or when a circuit breaker trips.
+
+**`504 Gateway Timeout`** — Your server didn't receive a timely response from an upstream service. Different from 502 — the upstream simply didn't respond in time.
+
+---
+
+## 5. Important Headers
+
+### Headers Your Server Must Read
+
+**`Host`** — Required in HTTP/1.1. Tells you which virtual host the client is targeting. Critical if you're serving multiple domains from one server.
+
+**`Content-Type`** — The media type of the request body. Always check this before parsing. If a client sends `application/xml` to your JSON endpoint, reject it with 415.
+
+**`Authorization`** — Carries the client's credentials. The value is `<scheme> <credentials>`, typically `Bearer <jwt>` for APIs.
+
+**`Cookie`** — Sends all cookies the client has stored for your domain. Used for session-based auth.
+
+**`Origin`** — Set by browsers on cross-origin requests. Your CORS logic reads this to decide whether to allow the request.
+
+**`X-Forwarded-For`** / **`Forwarded`** — When you're behind a reverse proxy, the client's real IP comes in one of these headers rather than the TCP connection source. `X-Forwarded-For` is the non-standard but widely-used version; `Forwarded` is the RFC standard. Never trust these blindly — a client can spoof them. Only trust them if the request came from a known trusted proxy IP.
+
+**`X-Forwarded-Proto`** — Tells you whether the original client request was HTTP or HTTPS. Important when your app is behind an SSL-terminating proxy — the connection to your app is HTTP, but the original client connection was HTTPS.
+
+**`If-None-Match`** / **`If-Modified-Since`** — Sent by clients for cache validation. Handle these and return `304` when the resource hasn't changed to save bandwidth.
+
+### Headers Your Server Must Set
+
+**`Content-Type`** — Always set this on responses with a body. For JSON APIs: `Content-Type: application/json; charset=utf-8`. If you don't set it, browsers may guess (MIME sniffing), which is a security issue.
+
+**`Location`** — Required with `201 Created` (points to the new resource) and all `3xx` redirects (points to the target URL).
+
+**`Cache-Control`** — Tells caches and browsers how long to store this response. Covered in depth in the Caching section.
+
+**`ETag`** — A version identifier for the resource. Clients send it back in `If-None-Match` for cache validation. Covered in Conditional Requests.
+
+**`Retry-After`** — Required with `429` and `503`. Value is either a number of seconds or an HTTP date. Clients and load balancers use this to back off intelligently.
+
+**`WWW-Authenticate`** — Required with `401`. Tells the client what auth scheme to use: `WWW-Authenticate: Bearer realm="api"`.
+
+**`Allow`** — Required with `405`. Lists the HTTP methods the endpoint supports: `Allow: GET, POST, OPTIONS`.
+
+**`Vary`** — Tells caches which request headers affect the response. If you serve gzip and uncompressed responses, set `Vary: Accept-Encoding` so caches store them separately.
+
+**`Server-Timing`** — Lets you expose server-side performance metrics to the client for debugging: `Server-Timing: db;dur=12, auth;dur=3`. Visible in browser DevTools.
+
+---
+
+## 6. Authentication
+
+HTTP defines a challenge-response framework. When a client hits a protected endpoint without credentials, the server returns `401 Unauthorized` with a `WWW-Authenticate` header describing the scheme. The client then retries with an `Authorization` header.
+
+**Basic Auth** sends credentials as `Base64(username:password)`. Base64 is reversible encoding, not encryption — it's only safe over HTTPS. Mostly legacy, but still used for internal tooling or simple service-to-service APIs.
+
+**Bearer Tokens (OAuth 2.0 / JWT)** are the most common scheme for modern APIs. The client sends `Authorization: Bearer <token>`. The token is typically a JWT validated by checking its signature. Stateless — no database lookup needed if the token is self-contained.
+
+**API Keys** are not a formal HTTP standard but a very common convention. Usually sent as a custom header (`X-API-Key: ...`) or as a query parameter. The server looks the key up in a database to identify the caller.
+
+For proxy authentication, the same flow exists but uses `407 Proxy Authentication Required`, `Proxy-Authenticate`, and `Proxy-Authorization` headers instead.
+
+---
+
+## 7. Cookies & Sessions
+
+HTTP is stateless, but cookies let the server store a small piece of data on the client that gets sent back with every subsequent request to the same origin. This is the foundation of session-based authentication.
+
+**Flow:** Server sends `Set-Cookie: session_id=abc123` → browser stores it → browser attaches `Cookie: session_id=abc123` to every subsequent request to that domain.
+
+As a backend developer, you control the `Set-Cookie` attributes, which determine the security and lifetime of your cookies.
+
+**`HttpOnly`** — The cookie is not accessible to JavaScript. This is a critical protection against XSS attacks stealing session tokens. Always set this for session cookies.
+
+**`Secure`** — The cookie is only sent over HTTPS. Always set this in production.
+
+**`SameSite`** — Controls whether the cookie is sent with cross-site requests. Your primary defense against CSRF.
+- `Strict` — Cookie is never sent on cross-site requests. Safest option, but users clicking a link from an external site will appear logged out.
+- `Lax` — Sent on top-level cross-site navigations (e.g. clicking a link), but not on subrequests from other sites. The modern browser default. Good balance for most apps.
+- `None; Secure` — Sent on all cross-site requests. Required for third-party cookie scenarios. Must be paired with `Secure`.
+
+**`Max-Age`** / **`Expires`** — Define when the cookie expires. Without these, it's a session cookie and disappears when the browser closes. With them, it persists across browser restarts.
+
+**`Path`** — Restricts the cookie to a specific URL path prefix.
+
+**`Domain`** — If set, the cookie is sent to all subdomains. If not set, it only goes to the exact origin that set it.
+
+---
+
+## 8. Caching
+
+Caching is one of the most impactful things you control from the backend. Getting it right means fewer requests hitting your servers and faster responses for users.
+
+### Cache-Control
+
+This is the primary header for controlling caching behavior. You set it on responses.
+
+**`max-age=<seconds>`** — The response is considered fresh for this many seconds from when it was fetched. `Cache-Control: max-age=3600` means the browser can use the cached copy for one hour before checking again.
+
+**`s-maxage=<seconds>`** — Like `max-age`, but specifically for shared caches (CDNs, reverse proxies). Overrides `max-age` for those intermediaries. This lets you give browsers a short TTL while letting your CDN hold the cache much longer.
+
+**`public`** — The response can be stored by shared caches (CDNs). Use this for content that is the same for all users.
+
+**`private`** — Only the end-user's browser may cache this. CDNs and shared proxies must not store it. Use for any user-specific data.
+
+**`no-cache`** — Confusingly named. It doesn't mean "don't cache" — it means "cache it, but revalidate with the server before using it." The cache sends a conditional request; if the resource hasn't changed, the server returns `304` and the cached copy is used. Good for pages where freshness is important but you want to avoid re-downloading unchanged content.
+
+**`no-store`** — Genuinely means "don't cache this at all, ever." Use for sensitive data like financial pages or anything with personal information.
+
+**`must-revalidate`** — Once the response becomes stale, the cache must not serve it without revalidating first. Prevents stale content from being served when the network is temporarily unavailable.
+
+**`immutable`** — Tells the browser this response will never change during its `max-age` window, so don't bother sending revalidation requests. Use this for content-hashed assets like `app.a3f4c5.js`. Eliminates unnecessary conditional requests on page reload.
+
+**`stale-while-revalidate=<seconds>`** — Serve the stale cached copy immediately while fetching a fresh version in the background. Gives low latency while keeping content reasonably up to date.
+
+### Caching Strategy by Resource Type
+
+| Resource | Recommended Cache-Control |
+|----------|--------------------------|
+| HTML pages | `no-cache` — always revalidate |
+| API responses (user-specific) | `private, no-store` |
+| API responses (public, semi-stable) | `public, max-age=60, s-maxage=300` |
+| Static assets (content-hashed) | `public, max-age=31536000, immutable` |
+| Sensitive data | `no-store` |
+
+---
+
+## 9. Compression
+
+Compression reduces response body size over the wire — often by 60–80% for JSON and HTML. The client declares what it supports in `Accept-Encoding`, and the server compresses the response and declares what it used in `Content-Encoding`.
+
+```
+# Client says it supports:
+Accept-Encoding: gzip, br, zstd
+
+# Server responds with:
+Content-Encoding: br
+```
+
+**gzip** is universally supported. **Brotli (`br`)** compresses better than gzip but only works over HTTPS. **Zstandard (`zstd`)** is newer and extremely fast at decompression.
+
+Always set `Vary: Accept-Encoding` when serving compressed responses so caches store separate versions per encoding. Don't compress already-compressed formats (JPEG, PNG, WebP, MP4, ZIP) — you'll increase size, not decrease it. Most web frameworks and reverse proxies handle compression automatically, but confirm it's enabled and not accidentally bypassed for API routes.
+
+---
+
+## 10. CORS
+
+CORS (Cross-Origin Resource Sharing) is a browser security mechanism. By default, browsers block JavaScript from reading responses from a different origin. Your backend opts in to allow it by sending the right response headers. CORS is a **browser enforcement** — server-to-server requests are never affected by it.
+
+**Same origin** means identical scheme + host + port. `https://api.example.com` and `https://app.example.com` are different origins even though they share a root domain.
+
+### Simple Requests
+GET/HEAD/POST requests with basic content types don't trigger a preflight. The browser sends the request directly, and your server must include `Access-Control-Allow-Origin` in the response to let the browser expose it to JavaScript.
+
+### Preflight Requests
+For custom headers, non-trivial content types, or methods other than GET/HEAD/POST, the browser first sends an `OPTIONS` request to check if the actual request is allowed. Your server must handle this preflight correctly or the actual request is never sent.
+
+```
+# Browser sends preflight
+OPTIONS /api/data HTTP/1.1
+Origin: https://app.example.com
+Access-Control-Request-Method: POST
+Access-Control-Request-Headers: Content-Type, Authorization
+
+# Your server must respond
+HTTP/1.1 204 No Content
+Access-Control-Allow-Origin: https://app.example.com
+Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS
+Access-Control-Allow-Headers: Content-Type, Authorization
+Access-Control-Max-Age: 86400
+```
+
+Set `Access-Control-Max-Age` to cache the preflight result — without it, the browser sends a preflight before every single request.
+
+### Credentialed Requests
+If your frontend sends cookies or an Authorization header cross-origin, you must explicitly allow credentials. You also cannot use `*` as the allowed origin — you must echo back the specific requesting origin.
+
+```
+Access-Control-Allow-Origin: https://app.example.com
+Access-Control-Allow-Credentials: true
+```
+
+### CORS Response Headers Summary
+| Header | Purpose |
+|--------|---------|
+| `Access-Control-Allow-Origin` | Which origins are allowed (`*` or a specific origin) |
+| `Access-Control-Allow-Methods` | Which request methods are allowed |
+| `Access-Control-Allow-Headers` | Which request headers the client can send |
+| `Access-Control-Expose-Headers` | Which response headers JavaScript is allowed to read |
+| `Access-Control-Max-Age` | How long the browser can cache the preflight result |
+| `Access-Control-Allow-Credentials` | Whether cookies and auth headers are allowed cross-origin |
+
+---
+
+## 11. Redirections
+
+Redirects are responses where the server tells the client to go to a different URL via the `Location` header.
+
+**`301 Moved Permanently`** — The resource has permanently moved. Browsers and search engines cache this and update links. The problem: many clients change the method to GET when following the redirect, even if the original was a POST.
+
+**`302 Found`** — Temporary redirect with the same method-changing issue as 301. Often misused as a permanent redirect — prefer 301 when you mean permanent.
+
+**`303 See Other`** — Always redirects to the target as a GET regardless of the original method. This is exactly what you want for the **Post/Redirect/Get (PRG) pattern**: after a POST that creates or submits something, redirect with 303 to a GET URL so the user doesn't accidentally resubmit on browser refresh.
+
+**`307 Temporary Redirect`** — Temporary redirect that strictly preserves the original HTTP method. If the original was a POST, the redirected request is also a POST.
+
+**`308 Permanent Redirect`** — Same as 307 but permanent. Use for permanent URL migrations where method preservation matters.
+
+**Rule of thumb:** Use 303 for the PRG pattern. Use 307/308 when you need to preserve the method. Use 301 for permanent URL migrations of GET resources.
+
+---
+
+## 12. Conditional Requests & ETags
+
+Conditional requests let clients ask "has this changed since I last fetched it?" If nothing has changed, the server returns `304 Not Modified` with no body — saving bandwidth and server processing. If the resource has changed, the server returns `200` with the new content.
+
+The server attaches **validators** to responses: `ETag: "a3b4c5"` (an opaque version identifier, often a hash) and/or `Last-Modified: <date>`. On subsequent requests, the client sends these back in `If-None-Match` or `If-Modified-Since`. Your server compares them and responds accordingly.
+
+**Preventing lost updates (optimistic locking):** ETags are also used to prevent two clients from overwriting each other. Client A fetches a resource and gets `ETag: "v1"`. It modifies and sends a `PUT` with `If-Match: "v1"`. If another client has changed the resource in the meantime (ETag is now `"v2"`), the server returns `412 Precondition Failed` and rejects the update. The client knows to re-fetch and resolve the conflict before retrying.
+
+**Conditional create:** Sending `If-None-Match: *` means "only do this if the resource doesn't already exist." Useful for ensuring idempotent resource creation with PUT.
+
+---
+
+## 13. Range Requests
+
+Range requests let a client fetch only a portion of a resource. This is what powers video seeking (jump to minute 45 of a video), resumable downloads (continue a download from byte 500MB), and parallel chunk downloads.
+
+The server signals it supports range requests with `Accept-Ranges: bytes`. The client then requests a specific byte range:
+
+```
+GET /files/large-dataset.csv HTTP/1.1
+Range: bytes=0-1048575
+```
+
+The server responds with `206 Partial Content` and a `Content-Range` header indicating the byte range and total size. If the range is invalid, the server returns `416 Range Not Satisfiable`. If the server doesn't support range requests, it ignores the header and returns `200` with the full content.
+
+---
+
+## 14. Connection Management & HTTP Versions
+
+Understanding how HTTP has evolved matters because it affects server configuration and performance characteristics.
+
+**HTTP/1.1** made connections persistent by default — the same TCP connection handles multiple request-response pairs sequentially. This was a significant improvement over HTTP/1.0 where every request opened a new TCP connection. However, it has **head-of-line blocking**: if one request stalls, all queued requests wait behind it. Browsers work around this by opening up to 6 parallel connections per domain.
+
+**HTTP/2** introduced **multiplexing** — multiple requests and responses can be in-flight simultaneously over a single connection using binary framing. This eliminates HTTP-level head-of-line blocking and makes opening multiple connections unnecessary. It also adds **HPACK header compression** (great for APIs with many repeated headers) and **server push** (proactively sending resources the client will need). To use HTTP/2, configure your server or reverse proxy with TLS — all browsers require HTTPS for HTTP/2.
+
+**HTTP/3** runs over **QUIC** (UDP-based) instead of TCP. This solves TCP-level head-of-line blocking — a lost packet only stalls the one stream it belongs to, not the entire connection. It also has faster connection establishment and handles network switching (WiFi to mobile) more gracefully. Built-in TLS 1.3. Increasingly supported by CDNs and reverse proxies.
+
+**Chunked Transfer Encoding** is how you stream a response when you don't know the total size upfront. Instead of buffering everything, you send `Transfer-Encoding: chunked` and write data in chunks. Useful for streaming large query results, real-time data feeds, and server-sent events.
+
+---
+
+## 15. Proxy Servers & Reverse Proxies
+
+Almost every production backend runs behind a **reverse proxy** (Nginx, Caddy, a cloud load balancer). It handles SSL termination, load balancing, caching, and rate limiting on your behalf.
+
+Because SSL is terminated at the proxy, your app sees requests arrive over plain HTTP — the connection to your app is HTTP even though the client used HTTPS. The proxy adds headers so your app knows the original request details:
+
+- **`X-Forwarded-For`** — The original client IP. Log this, not the direct connection IP (which would be the proxy's IP).
+- **`X-Forwarded-Proto`** — Whether the original client connection was `http` or `https`. Critical for generating correct redirect URLs and enforcing HTTPS inside your app.
+- **`X-Forwarded-Host`** — The original `Host` header from the client.
+- **`Forwarded`** — The RFC 7239 standard header that combines all the above into one: `Forwarded: for=203.0.113.5;proto=https;host=example.com`.
+
+**Security warning:** Always verify that these headers come from a trusted proxy IP. A client making a direct request to your app (bypassing the proxy) can set any `X-Forwarded-For` value they want — trusting it blindly lets them spoof their IP for rate limiting or logging purposes.
+
+**CONNECT tunneling** is how proxies handle HTTPS traffic. When a browser wants to reach `https://example.com` through a proxy, it sends `CONNECT example.com:443 HTTP/1.1`. The proxy opens a TCP tunnel to that host, responds with `200 Connection Established`, then blindly forwards bytes in both directions. The TLS handshake happens through the tunnel, which is why a proxy can forward HTTPS traffic without being able to read it.
+
+---
+
+## Quick Reference
+
+### API Response Checklist
+- Return `201 Created` with a `Location` header for resource creation.
+- Return `204 No Content` (no body) for successful deletes and no-content updates.
+- Return `422 Unprocessable Content` for validation failures, not `400`.
+- Return `429 Too Many Requests` with a `Retry-After` header for rate limiting.
+- Return `503 Service Unavailable` with a `Retry-After` header during maintenance or overload.
+- Include an `Allow` header with every `405 Method Not Allowed`.
+- Include a `WWW-Authenticate` header with every `401`.
+- Never return `5xx` for bad client input — that is always a `4xx`.
+
+### Minimum Security Headers
+```
+Strict-Transport-Security: max-age=31536000; includeSubDomains
+X-Content-Type-Options: nosniff
+X-Frame-Options: DENY
+Referrer-Policy: strict-origin-when-cross-origin
+```
+
+---
+
+*Source: [MDN Web Docs — HTTP](https://developer.mozilla.org/en-US/docs/Web/HTTP)*
