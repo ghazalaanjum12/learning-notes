@@ -1,0 +1,303 @@
+# Spring Boot Revision Notes
+
+## 1. Project Structure — Entity Folder
+
+In Spring Boot, entities are stored in either:
+- `model` — more common in older conventions, groups all domain objects
+- `entity` — more explicit, signals JPA/database-mapped classes
+
+```
+com.example.myapp/
+├── controller/
+├── service/
+├── repository/
+├── model/        ← option 1
+└── entity/       ← option 2
+```
+
+Use `entity` if you also have DTOs or other model classes. Use `model` if entities are your only domain objects.
+
+---
+
+## 2. OpenAPI Generator — Inline Objects
+
+### Problem
+When a response schema is defined **inline** (anonymously), the generator auto-names it `InlineObject1`, `InlineObject2`, etc.
+
+```yaml
+# ❌ This generates InlineObject1
+SingleCommentResponse:
+  content:
+    application/json:
+      schema:
+        type: object        # anonymous inline object
+        properties:
+          comment:
+            $ref: '#/components/schemas/Comment'
+```
+
+### Fix 1 — Extract to `components/schemas`
+```yaml
+components:
+  schemas:
+    SingleCommentBody:
+      type: object
+      properties:
+        comment:
+          $ref: '#/components/schemas/Comment'
+```
+Then reference it:
+```yaml
+SingleCommentResponse:
+  content:
+    application/json:
+      schema:
+        $ref: '#/components/schemas/SingleCommentBody'
+```
+
+### Fix 2 — Add a `title` field (simpler)
+```yaml
+SingleCommentResponse:
+  content:
+    application/json:
+      schema:
+        title: SingleCommentResponse   # ← generator uses this as the class name
+        type: object
+        properties:
+          comment:
+            $ref: '#/components/schemas/Comment'
+```
+
+**Rule:** Any inline `type: object` in a response/request body triggers auto-naming. Use `title` or extract to `components/schemas` to control the name.
+
+---
+
+## 3. Lombok
+
+Lombok is a Java library that **automatically generates boilerplate code** at compile time using annotations.
+
+### Common Annotations
+| Annotation | What it generates |
+|---|---|
+| `@Getter` | Getters for all fields |
+| `@Setter` | Setters for all fields |
+| `@NoArgsConstructor` | Empty constructor |
+| `@AllArgsConstructor` | Constructor with all fields |
+| `@RequiredArgsConstructor` | Constructor for `final`/`@NonNull` fields |
+| `@ToString` | `toString()` method |
+| `@EqualsAndHashCode` | `equals()` and `hashCode()` |
+| `@Data` | `@Getter` + `@Setter` + `@ToString` + `@EqualsAndHashCode` + `@RequiredArgsConstructor` |
+| `@Builder` | Builder pattern |
+| `@Slf4j` | Logger field |
+
+### Example
+```java
+// Without Lombok — lots of boilerplate
+public class User {
+    private String username;
+    private String email;
+    public User() {}
+    public User(String username, String email) { ... }
+    public String getUsername() { return username; }
+    public void setUsername(String username) { this.username = username; }
+    // toString, equals, hashCode...
+}
+
+// With Lombok — clean and simple
+@Data
+@AllArgsConstructor
+@NoArgsConstructor
+public class User {
+    private String username;
+    private String email;
+}
+```
+
+### Lombok in `pom.xml` — Why excluded then re-added
+
+```xml
+<!-- Excluded from final packaged JAR — not needed at runtime -->
+<plugin>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-maven-plugin</artifactId>
+    <configuration>
+        <excludes>
+            <exclude>
+                <groupId>org.projectlombok</groupId>
+                <artifactId>lombok</artifactId>
+            </exclude>
+        </excludes>
+    </configuration>
+</plugin>
+
+<!-- Added as annotation processor — needed at compile time to generate code -->
+<plugin>
+    <groupId>org.apache.maven.plugins</groupId>
+    <artifactId>maven-compiler-plugin</artifactId>
+    <configuration>
+        <annotationProcessorPaths>
+            <path>
+                <groupId>org.projectlombok</groupId>
+                <artifactId>lombok</artifactId>
+            </path>
+        </annotationProcessorPaths>
+    </configuration>
+</plugin>
+```
+
+- **Compiler plugin** → use Lombok to generate code while compiling
+- **Boot plugin exclusion** → don't include Lombok in the final packaged app
+
+---
+
+## 4. Java Records
+
+A **record** is a special class (Java 16+) designed as a **pure immutable data carrier**.
+
+```java
+public record User(String username, String email) {}
+```
+
+Automatically generates:
+- Constructor with all fields
+- Getters (named `username()` not `getUsername()`)
+- `toString()`
+- `equals()`
+- `hashCode()`
+
+### Custom constructor for validation
+```java
+public record User(String username, String email) {
+
+    public User {
+        if (username == null || username.isBlank()) {
+            throw new IllegalArgumentException("Username cannot be blank");
+        }
+    }
+
+    public String displayName() {
+        return username.toUpperCase();
+    }
+}
+```
+
+### Records vs Lombok
+| | Records | Lombok |
+|---|---|---|
+| Immutable | ✅ Always | ❌ Optional |
+| Setters | ❌ Not supported | ✅ Supported |
+| JPA Entities | ❌ Not suitable | ✅ Suitable |
+| DTOs / Response objects | ✅ Great fit | ✅ Also works |
+
+Records are best for **immutable DTOs and response objects**. Lombok is better for **JPA entities** since they need setters and a no-args constructor.
+
+---
+
+## 5. `@Entity` and `@Table` Annotations
+
+### `@Entity`
+Tells JPA/Hibernate that this class is **mapped to a database table**. Required for JPA to manage the class.
+
+```java
+@Entity
+public class User {
+    @Id
+    private Long id;
+    private String username;
+    private String email;
+}
+```
+
+By default maps to a table with the same name as the class (`User` → `user`).
+
+### `@Table`
+Optional. Lets you **customize the table mapping**.
+
+```java
+@Entity
+@Table(name = "users")  // maps to "users" table instead of "user"
+public class User {
+    @Id
+    private Long id;
+    private String username;
+    private String email;
+}
+```
+
+Full options:
+```java
+@Table(
+    name = "users",
+    schema = "myschema",
+    uniqueConstraints = {
+        @UniqueConstraint(columnNames = {"username", "email"})
+    },
+    indexes = {
+        @Index(columnList = "username")
+    }
+)
+```
+
+### Summary
+| Annotation | Required | Purpose |
+|---|---|---|
+| `@Entity` | ✅ Yes | Marks class as a JPA entity |
+| `@Table` | ❌ No | Customizes table name, schema, constraints, indexes |
+
+---
+
+## 6. Test Dependencies
+
+### `spring-boot-starter-webmvc-test`
+Provides testing support for the **web/MVC layer**. Bundles:
+- `MockMvc` — simulate HTTP requests without starting a real server
+- `@WebMvcTest` — loads only the web layer (controllers, filters, converters)
+- JUnit 5, Mockito, AssertJ, Hamcrest, JsonPath
+
+```java
+@WebMvcTest(ArticlesController.class)
+class ArticlesControllerTest {
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @MockBean
+    private ArticlesService articlesService;
+
+    @Test
+    void shouldReturnArticle() throws Exception {
+        mockMvc.perform(get("/api/articles/my-slug"))
+               .andExpect(status().isOk())
+               .andExpect(jsonPath("$.article.slug").value("my-slug"));
+    }
+}
+```
+
+### DataSource in Tests
+If your test loads the full Spring context (`@SpringBootTest`) but has no database configured, it will fail with:
+```
+Failed to determine a suitable driver class
+```
+
+Fix by adding H2 as an in-memory test database:
+```xml
+<dependency>
+    <groupId>com.h2database</groupId>
+    <artifactId>h2</artifactId>
+    <scope>test</scope>
+</dependency>
+```
+
+Or configure test properties:
+```java
+@SpringBootTest
+@TestPropertySource(properties = {
+    "spring.datasource.url=jdbc:h2:mem:testdb",
+    "spring.datasource.driver-class-name=org.h2.Driver",
+    "spring.jpa.database-platform=org.hibernate.dialect.H2Dialect"
+})
+class ConduitApplicationTests {
+    @Test
+    void contextLoads() {}
+}
+```
